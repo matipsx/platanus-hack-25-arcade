@@ -5,7 +5,7 @@ const config = {
   type: Phaser.AUTO,
   width: 800,
   height: 600,
-  backgroundColor: '#1a0a00',
+  backgroundColor: '#1a1a2e',
   scene: {
     preload: preload,
     create: create,
@@ -26,6 +26,7 @@ let xp = 0;
 let level = 1;
 let hp = 100;
 let gameOver = false;
+let gameStarted = false;
 let gameDuration = 0;
 let keys;
 
@@ -34,6 +35,7 @@ let scoreText;
 let timeText;
 let levelText;
 let hpBar;
+let xpBar;
 let upgradeMenu;
 
 // Weapon systems
@@ -81,44 +83,82 @@ function create() {
     d: Phaser.Input.Keyboard.KeyCodes.D
   });
 
-  // UI setup
-  scoreText = this.add.text(16, 16, 'Score: 0', {
+  // UI setup - Geometry Wars style (right side) - HIGH DEPTH
+  scoreText = this.add.text(780, 20, '0', {
+    fontSize: '48px',
+    fontFamily: 'Impact, Arial Black, sans-serif',
+    color: '#00ffff',
+    stroke: '#000000',
+    strokeThickness: 4,
+    align: 'right'
+  }).setOrigin(1, 0).setDepth(100);
+
+  // Score label
+  this.add.text(780, 5, 'SCORE', {
+    fontSize: '12px',
+    fontFamily: 'Courier New, monospace',
+    color: '#ffffff',
+    align: 'right'
+  }).setOrigin(1, 0).setDepth(100);
+
+  timeText = this.add.text(780, 90, '0:00', {
+    fontSize: '28px',
+    fontFamily: 'Impact, Arial Black, sans-serif',
+    color: '#ffff00',
+    stroke: '#000000',
+    strokeThickness: 3,
+    align: 'right'
+  }).setOrigin(1, 0).setDepth(100);
+  
+  // Time label
+  this.add.text(780, 75, 'TIME', {
+    fontSize: '12px',
+    fontFamily: 'Courier New, monospace',
+    color: '#ffffff',
+    align: 'right'
+  }).setOrigin(1, 0).setDepth(100);
+
+  levelText = this.add.text(780, 150, 'LVL 1', {
     fontSize: '24px',
+    fontFamily: 'Impact, Arial Black, sans-serif',
+    color: '#00ff00',
+    stroke: '#000000',
+    strokeThickness: 3,
+    align: 'right'
+  }).setOrigin(1, 0).setDepth(100);
+  
+  // Level label
+  this.add.text(780, 135, 'LEVEL', {
+    fontSize: '12px',
     fontFamily: 'Courier New, monospace',
-    color: '#ffff00',
-    fontStyle: 'bold'
-  });
+    color: '#ffffff',
+    align: 'right'
+  }).setOrigin(1, 0).setDepth(100);
 
-  timeText = this.add.text(16, 45, 'Time: 0:00', {
-    fontSize: '20px',
-    fontFamily: 'Courier New, monospace',
-    color: '#ffa500',
-    fontStyle: 'bold'
-  });
-
-  levelText = this.add.text(400, 16, 'Level: 1', {
-    fontSize: '26px',
-    fontFamily: 'Courier New, monospace',
-    color: '#ffff00',
-    fontStyle: 'bold',
-    stroke: '#ff8800',
-    strokeThickness: 3
-  }).setOrigin(0.5, 0);
-
-  // HP bar background
+  // HP bar (bottom left corner - Geometry Wars style) - HIGH DEPTH
   const hpBg = this.add.graphics();
-  hpBg.fillStyle(0x330000, 1);
-  hpBg.fillRect(16, 75, 204, 24);
+  hpBg.fillStyle(0x330000, 0.8);
+  hpBg.fillRect(20, 560, 204, 20);
+  hpBg.setDepth(100);
   
   hpBar = this.add.graphics();
-
+  hpBar.setDepth(101);
+  
   // HP label
-  this.add.text(16, 75, 'HP', {
-    fontSize: '18px',
+  this.add.text(20, 545, 'HEALTH', {
+    fontSize: '12px',
     fontFamily: 'Courier New, monospace',
-    color: '#ff0000',
-    fontStyle: 'bold'
-  });
+    color: '#ff0000'
+  }).setDepth(100);
+
+  // XP bar (below HP bar)
+  const xpBg = this.add.graphics();
+  xpBg.fillStyle(0x001a33, 0.8);
+  xpBg.fillRect(20, 583, 204, 10);
+  xpBg.setDepth(100);
+  
+  xpBar = this.add.graphics();
+  xpBar.setDepth(101);
 
   // Start with laser weapon
   weapons.laser.active = true;
@@ -126,17 +166,79 @@ function create() {
 
   // Instructions
   this.add.text(400, 580, 'WASD/Arrows to Move | Survive!', {
-    fontSize: '18px',
+    fontSize: '14px',
     fontFamily: 'Courier New, monospace',
-    color: '#ffaa00',
-    fontStyle: 'bold'
-  }).setOrigin(0.5);
+    color: '#888888'
+  }).setOrigin(0.5).setDepth(100);
+
+  // Start screen overlay
+  const startOverlay = this.add.graphics();
+  startOverlay.fillStyle(0x000000, 0.9);
+  startOverlay.fillRect(0, 0, 800, 600);
+  startOverlay.setDepth(1000);
+  
+  // ASCII title
+  const titleText = this.add.text(400, 150, 
+    '██████╗ ██╗      █████╗ ████████╗ █████╗ ███╗   ██╗██╗   ██╗███████╗\n' +
+    '██╔══██╗██║     ██╔══██╗╚══██╔══╝██╔══██╗████╗  ██║██║   ██║██╔════╝\n' +
+    '██████╔╝██║     ███████║   ██║   ███████║██╔██╗ ██║██║   ██║███████╗\n' +
+    '██╔═══╝ ██║     ██╔══██║   ██║   ██╔══██║██║╚██╗██║██║   ██║╚════██║\n' +
+    '██║     ███████╗██║  ██║   ██║   ██║  ██║██║ ╚████║╚██████╔╝███████║\n' +
+    '╚═╝     ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚══════╝\n' +
+    '███████╗██╗   ██╗██████╗ ██╗   ██╗██╗██╗   ██╗██╗   ██╗███████╗\n' +
+    '██╔════╝██║   ██║██╔══██╗██║   ██║██║██║   ██║██║   ██║██╔════╝\n' +
+    '███████╗██║   ██║██████╔╝██║   ██║██║██║   ██║██║   ██║███████╗\n' +
+    '╚════██║██║   ██║██╔══██╗╚██╗ ██╔╝██║╚██╗ ██╔╝██║   ██║╚════██║\n' +
+    '███████║╚██████╔╝██║  ██║ ╚████╔╝ ██║ ╚████╔╝ ╚██████╔╝███████║\n' +
+    '╚══════╝ ╚═════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝  ╚═══╝   ╚═════╝ ╚══════╝', {
+    fontSize: '9px',
+    fontFamily: 'Courier New, monospace',
+    color: '#00ffff',
+    align: 'center',
+    lineSpacing: -2
+  }).setOrigin(0.5).setDepth(1001);
+  
+  const pressStart = this.add.text(400, 420, 'PRESS START', {
+    fontSize: '32px',
+    fontFamily: 'Impact, Arial Black, sans-serif',
+    color: '#ffff00',
+    stroke: '#000000',
+    strokeThickness: 4
+  }).setOrigin(0.5).setDepth(1001);
+  
+  // Blinking animation
+  scene.tweens.add({
+    targets: pressStart,
+    alpha: { from: 1, to: 0.3 },
+    duration: 600,
+    yoyo: true,
+    repeat: -1
+  });
+  
+  const controls = this.add.text(400, 480, 
+    'WASD or ARROW KEYS to move\n' +
+    'Avoid the bananas!', {
+    fontSize: '16px',
+    fontFamily: 'Courier New, monospace',
+    color: '#ffffff',
+    align: 'center'
+  }).setOrigin(0.5).setDepth(1001);
+  
+  // Wait for any key press to start
+  this.input.keyboard.once('keydown', () => {
+    gameStarted = true;
+    startOverlay.destroy();
+    titleText.destroy();
+    pressStart.destroy();
+    controls.destroy();
+    playTone(this, 440, 0.1);
+  });
 
   playTone(this, 440, 0.1);
 }
 
 function update(time, delta) {
-  if (gameOver) return;
+  if (gameOver || !gameStarted) return;
 
   gameDuration += delta;
   updateTimer();
@@ -166,7 +268,7 @@ function update(time, delta) {
 
   // Keep player in bounds
   player.x = Math.max(player.size, Math.min(800 - player.size, player.x));
-  player.y = Math.max(player.size + 100, Math.min(600 - player.size, player.y));
+  player.y = Math.max(player.size, Math.min(600 - player.size, player.y));
 
   // Update weapons
   updateWeapons(this, delta);
@@ -301,7 +403,7 @@ function updateProjectiles(scene, delta) {
     }
     
     // Remove lasers if out of bounds or expired
-    if (p.type === 'laser' && (p.x < 0 || p.x > 800 || p.y < 100 || p.y > 600 || p.life <= 0)) {
+    if (p.type === 'laser' && (p.x < 0 || p.x > 800 || p.y < 0 || p.y > 600 || p.life <= 0)) {
       projectiles.splice(i, 1);
       continue;
     }
@@ -415,9 +517,9 @@ function spawnBanana() {
   const side = Math.floor(Math.random() * 4);
   let x, y;
   
-  if (side === 0) { x = -20; y = 120 + Math.random() * 460; }
-  else if (side === 1) { x = 820; y = 120 + Math.random() * 460; }
-  else if (side === 2) { x = Math.random() * 800; y = 80; }
+  if (side === 0) { x = -20; y = Math.random() * 600; }
+  else if (side === 1) { x = 820; y = Math.random() * 600; }
+  else if (side === 2) { x = Math.random() * 800; y = -20; }
   else { x = Math.random() * 800; y = 620; }
   
   const speedMult = 1 + (waveLevel - 1) * 0.15;
@@ -447,14 +549,14 @@ function updateBananas(delta) {
     
     // Keep bananas within play area
     b.x = Math.max(b.size, Math.min(800 - b.size, b.x));
-    b.y = Math.max(100 + b.size, Math.min(600 - b.size, b.y));
+    b.y = Math.max(b.size, Math.min(600 - b.size, b.y));
   }
 }
 
 function killBanana(scene, index) {
   const b = bananas[index];
   score += 10;
-  scoreText.setText('Score: ' + score);
+  scoreText.setText(score.toString());
   
   // Destroy sprite if it exists
   if (b.sprite) {
@@ -500,7 +602,7 @@ function updateGems(scene) {
 
 function levelUp(scene) {
   level++;
-  levelText.setText('Level: ' + level);
+  levelText.setText('LVL ' + level);
   
   // Unlock missile at level 5
   if (level === 5) {
@@ -554,9 +656,18 @@ function checkCollisions(scene) {
 function draw() {
   graphics.clear();
   
-  // Draw play area border
-  graphics.lineStyle(4, 0xffaa00, 1);
-  graphics.strokeRect(0, 100, 800, 500);
+  // Draw play area border (darker, Geometry Wars style)
+  graphics.lineStyle(2, 0x00ffff, 0.3);
+  graphics.strokeRect(0, 0, 800, 600);
+  
+  // Draw grid (subtle)
+  graphics.lineStyle(1, 0x00ffff, 0.05);
+  for (let x = 0; x <= 800; x += 50) {
+    graphics.lineBetween(x, 0, x, 600);
+  }
+  for (let y = 0; y <= 600; y += 50) {
+    graphics.lineBetween(0, y, 800, y);
+  }
   
   // Draw player (nerd with glasses)
   graphics.fillStyle(0x00ffff, 1);
@@ -644,15 +755,42 @@ function draw() {
     graphics.fillCircle(g.x, g.y, 4);
   }
   
-  // Update HP bar
+  // Update HP bar (Geometry Wars style - glowing)
   hpBar.clear();
-  hpBar.fillStyle(0xff0000, 1);
-  hpBar.fillRect(45, 77, hp * 1.75, 20);
+  const hpPercent = hp / 100;
   
-  // HP bar glow effect
-  if (hp < 30) {
-    hpBar.fillStyle(0xff4444, 0.5);
-    hpBar.fillRect(45, 77, hp * 1.75, 20);
+  // Glow effect
+  hpBar.fillStyle(0xff0000, 0.3);
+  hpBar.fillRect(18, 558, hp * 2 + 4, 24);
+  
+  // Main bar
+  hpBar.fillStyle(0xff0000, 1);
+  hpBar.fillRect(20, 560, hp * 2, 20);
+  
+  // Bright edge
+  if (hp > 0) {
+    hpBar.fillStyle(0xff6666, 1);
+    hpBar.fillRect(20, 560, hp * 2, 4);
+  }
+
+  // Update XP bar
+  xpBar.clear();
+  const xpInLevel = xp % 10; // Current XP progress within the level (0-9)
+  const xpPercent = xpInLevel / 10; // Convert to 0.0-1.0
+  const xpWidth = 200 * xpPercent;
+  
+  // Glow effect
+  xpBar.fillStyle(0x00ffff, 0.3);
+  xpBar.fillRect(18, 581, xpWidth + 4, 14);
+  
+  // Main bar
+  xpBar.fillStyle(0x00ffff, 1);
+  xpBar.fillRect(20, 583, xpWidth, 10);
+  
+  // Bright edge
+  if (xpWidth > 0) {
+    xpBar.fillStyle(0x66ffff, 1);
+    xpBar.fillRect(20, 583, xpWidth, 2);
   }
 }
 
@@ -660,61 +798,62 @@ function updateTimer() {
   const seconds = Math.floor(gameDuration / 1000);
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
-  timeText.setText('Time: ' + mins + ':' + (secs < 10 ? '0' : '') + secs);
+  timeText.setText(mins + ':' + (secs < 10 ? '0' : '') + secs);
 }
 
 function endGame(scene) {
   gameOver = true;
   
   const overlay = scene.add.graphics();
-  overlay.fillStyle(0x000000, 0.85);
+  overlay.fillStyle(0x000000, 0.8);
   overlay.fillRect(0, 0, 800, 600);
   
-  scene.add.text(400, 220, 'GAME OVER', {
-    fontSize: '72px',
+  // ASCII "GAME OVER"
+  scene.add.text(400, 180, 
+    ' ██████╗  █████╗ ███╗   ███╗███████╗     ██████╗ ██╗   ██╗███████╗██████╗ \n' +
+    '██╔════╝ ██╔══██╗████╗ ████║██╔════╝    ██╔═══██╗██║   ██║██╔════╝██╔══██╗\n' +
+    '██║  ███╗███████║██╔████╔██║█████╗      ██║   ██║██║   ██║█████╗  ██████╔╝\n' +
+    '██║   ██║██╔══██║██║╚██╔╝██║██╔══╝      ██║   ██║╚██╗ ██╔╝██╔══╝  ██╔══██╗\n' +
+    '╚██████╔╝██║  ██║██║ ╚═╝ ██║███████╗    ╚██████╔╝ ╚████╔╝ ███████╗██║  ██║\n' +
+    ' ╚═════╝ ╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝     ╚═════╝   ╚═══╝  ╚══════╝╚═╝  ╚═╝', {
+    fontSize: '10px',
     fontFamily: 'Courier New, monospace',
-    color: '#ffff00',
-    fontStyle: 'bold',
-    stroke: '#ff8800',
-    strokeThickness: 8
+    color: '#ff0000',
+    align: 'center',
+    lineSpacing: -2
   }).setOrigin(0.5);
   
-  scene.add.text(400, 320, 'SCORE: ' + score, {
-    fontSize: '40px',
-    fontFamily: 'Courier New, monospace',
-    color: '#ffaa00',
-    fontStyle: 'bold',
+  scene.add.text(400, 340, 'SCORE: ' + score, {
+    fontSize: '32px',
+    fontFamily: 'Impact, Arial Black, sans-serif',
+    color: '#00ffff',
     stroke: '#000000',
     strokeThickness: 4
   }).setOrigin(0.5);
   
   const mins = Math.floor(gameDuration / 60000);
   const secs = Math.floor((gameDuration % 60000) / 1000);
-  scene.add.text(400, 380, 'TIME: ' + mins + ':' + (secs < 10 ? '0' : '') + secs, {
-    fontSize: '28px',
-    fontFamily: 'Courier New, monospace',
-    color: '#ffa500',
-    fontStyle: 'bold'
+  scene.add.text(400, 390, 'TIME: ' + mins + ':' + (secs < 10 ? '0' : '') + secs, {
+    fontSize: '24px',
+    fontFamily: 'Impact, Arial Black, sans-serif',
+    color: '#ffff00'
   }).setOrigin(0.5);
   
   // Restart button
-  const restartBtn = scene.add.text(400, 480, '>>> RESTART <<<', {
-    fontSize: '36px',
-    fontFamily: 'Courier New, monospace',
+  const restartBtn = scene.add.text(400, 480, 'RESTART', {
+    fontSize: '32px',
+    fontFamily: 'Impact, Arial Black, sans-serif',
     color: '#00ff00',
-    fontStyle: 'bold',
     stroke: '#000000',
     strokeThickness: 4
   }).setOrigin(0.5).setInteractive({ useHandCursor: true });
   
   restartBtn.on('pointerover', () => {
     restartBtn.setColor('#ffff00');
-    restartBtn.setStroke('#ff8800', 4);
   });
   
   restartBtn.on('pointerout', () => {
     restartBtn.setColor('#00ff00');
-    restartBtn.setStroke('#000000', 4);
   });
   
   restartBtn.on('pointerdown', () => {
@@ -736,6 +875,7 @@ function endGame(scene) {
 
 function resetGame() {
   gameOver = false;
+  gameStarted = false;
   score = 0;
   xp = 0;
   level = 1;
