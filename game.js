@@ -15,6 +15,86 @@ const config = {
 
 const game = new Phaser.Game(config);
 
+const CRT_FRAGMENT_SHADER = `
+precision mediump float;
+
+uniform sampler2D uMainSampler;
+uniform float time;
+uniform vec2 resolution;
+varying vec2 outTexCoord;
+
+float rand(vec2 co) {
+  return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+void main() {
+  vec2 uv = outTexCoord;
+  // Zoom: scale uv around center
+  float zoom = 1.15;
+  uv = (uv - 0.5) / zoom + 0.5;
+
+  vec2 centered = uv * 2.0 - 1.0;
+  float dist = dot(centered, centered);
+
+  // Barrel distortion
+  centered *= 1.0 + dist * 0.1;
+  uv = centered * 0.5 + 0.5;
+
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+  }
+
+  vec3 color = texture2D(uMainSampler, uv).rgb;
+
+  // Scanlines
+  float scan = sin((uv.y + time * 0.5) * resolution.y * 1.5) * 0.08;
+  color -= scan;
+
+  // Shadow mask
+  float mask = sin(uv.x * resolution.x * 0.75) * 0.05;
+  color += mask;
+
+  // Flicker noise
+  float noise = rand(vec2(time * 10.0, uv.y)) * 0.03;
+  color += noise;
+
+  // Vignette
+  float vignette = 1.0 - dist * 0.35;
+  color *= vignette;
+
+  color = clamp(color, 0.0, 1.0);
+  gl_FragColor = vec4(color, 1.0);
+}`;
+
+class CRTPipeline extends Phaser.Renderer.WebGL.Pipelines.PostFXPipeline {
+  constructor(game) {
+    super({
+      game,
+      name: "crtPipeline",
+      fragShader: CRT_FRAGMENT_SHADER,
+    });
+    this._time = 0;
+  }
+
+  onPreRender() {
+    this._time += this.game.loop.delta / 1000;
+    this.set1f("time", this._time);
+    const scale = this.game.scale;
+    const width = Number(
+      scale && typeof scale.width === "number"
+        ? scale.width
+        : this.game.config.width
+    );
+    const height = Number(
+      scale && typeof scale.height === "number"
+        ? scale.height
+        : this.game.config.height
+    );
+    this.set2f("resolution", width, height);
+  }
+}
+
 // Game state
 let player;
 let bananas = [];
@@ -59,6 +139,13 @@ function preload() {
 function create() {
   const scene = this;
   graphics = this.add.graphics();
+
+  // Register and apply CRT shader
+  const renderer = this.renderer;
+  if (renderer && renderer.pipelines) {
+    renderer.pipelines.addPostPipeline('crtPipeline', CRTPipeline);
+    this.cameras.main.setPostPipeline('crtPipeline');
+  }
 
   // Create player (nerd programmer)
   player = {
@@ -699,24 +786,48 @@ function draw() {
     }
   }
   
-  // Draw bananas
+  // Draw bananas (Asteroids-style vector outline)
   for (let b of bananas) {
-    // Create sprite if it doesn't exist
-    if (!b.sprite && graphics.scene && graphics.scene.textures.exists('banana')) {
-      b.sprite = graphics.scene.add.image(b.x, b.y, 'banana').setScale(0.75);
+    // Draw banana outline as vector shape
+    graphics.lineStyle(2, 0xffff00, 1);
+    graphics.beginPath();
+    
+    // Banana shape coordinates (relative to center)
+    const scale = 1.0;
+    const points = [
+  [-16, 7],
+  [-11, 4],
+  [-1, -4],
+  [1, -10],
+  [3, -15],
+  [8, -15],
+  [10, -10],
+  [10, -1],
+  [8, 5],
+  [4, 11],
+  [-2, 14],
+  [-11, 15],
+  [-17, 13],
+  [-21, 10],
+  [-19, 7],
+  [-16, 7]
+];
+    
+    // Move to first point
+    graphics.moveTo(b.x + points[0][0] * scale, b.y + points[0][1] * scale);
+    
+    // Draw lines to each point
+    for (let i = 1; i < points.length; i++) {
+      graphics.lineTo(b.x + points[i][0] * scale, b.y + points[i][1] * scale);
     }
     
-    // Update sprite position
+    graphics.strokePath();
+    graphics.closePath();
+    
+    // Destroy sprite if it exists (we're using vectors now)
     if (b.sprite) {
-      b.sprite.x = b.x;
-      b.sprite.y = b.y;
-    } else {
-      // Fallback to drawn banana if sprite not loaded
-      graphics.fillStyle(0xffff00, 1);
-      graphics.fillCircle(b.x, b.y, b.size);
-      graphics.fillStyle(0x000000, 1);
-      graphics.fillCircle(b.x - 3, b.y - 2, 2);
-      graphics.fillCircle(b.x + 3, b.y - 2, 2);
+      b.sprite.destroy();
+      b.sprite = null;
     }
   }
   
