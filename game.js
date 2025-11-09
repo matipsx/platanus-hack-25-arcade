@@ -171,6 +171,7 @@ let gems = [];
 let projectiles = [];
 let particles = [];
 let explosions = [];
+let backgroundParticles = [];
 let graphics;
 let keys;
 
@@ -185,6 +186,10 @@ let gameDuration = 0;
 let gameOver = false;
 let gameStarted = false;
 let miniBossSpawned = false;
+
+// Leaderboard
+let leaderboard = [];
+const MAX_LEADERBOARD_ENTRIES = 10;
 
 // Enemy spawning
 let spawnTimer = 0;
@@ -216,6 +221,9 @@ function preload() {
 function create() {
   const scene = this;
   graphics = this.add.graphics();
+
+  // Load leaderboard from localStorage
+  loadLeaderboard();
 
   // Register and apply CRT shader
   const renderer = this.renderer;
@@ -320,6 +328,19 @@ function create() {
   // Start with laser weapon
   weapons.laser.active = true;
   weapons.laser.level = 1;
+
+  // Initialize background particles
+  for (let i = 0; i < 100; i++) {
+    backgroundParticles.push({
+      x: Math.random() * GAME_CONFIG.width,
+      y: Math.random() * GAME_CONFIG.height,
+      vx: (Math.random() - 0.5) * 20,
+      vy: (Math.random() - 0.5) * 20,
+      size: Math.random() * 2 + 0.5,
+      alpha: Math.random() * 0.3 + 0.1,
+      color: Math.random() > 0.5 ? COLORS.cyan : COLORS.yellow
+    });
+  }
 
   // Instructions
   this.add.text(400, 580, 'WASD/Arrows to Move', {
@@ -429,6 +450,7 @@ function update(time, delta) {
 
   // Update systems
   updatePlayerMovement(delta);
+  updateBackgroundParticles(delta);
   updateWeapons(this, delta);
   updateSpawning(delta);
   updateBananas(delta);
@@ -438,6 +460,20 @@ function update(time, delta) {
   updateGems(this);
   checkCollisions(this);
   updateDifficulty();
+
+  // Add player movement particles
+  if ((player.vx !== 0 || player.vy !== 0) && Math.random() > 0.5) {
+    particles.push({
+      x: player.x + (Math.random() - 0.5) * player.size,
+      y: player.y + (Math.random() - 0.5) * player.size,
+      vx: -player.vx * 50 + (Math.random() - 0.5) * 20,
+      vy: -player.vy * 50 + (Math.random() - 0.5) * 20,
+      life: 200,
+      maxLife: 200,
+      size: 1.5,
+      color: COLORS.cyan
+    });
+  }
 
   draw();
 }
@@ -575,6 +611,22 @@ function fireLaser() {
       damage: weapons.laser.damage,
       life: 2000
     });
+    
+    // Laser fire particles
+    for (let i = 0; i < 5; i++) {
+      const angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.5;
+      const speed = 300 + Math.random() * 200;
+      particles.push({
+        x: player.x,
+        y: player.y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 150,
+        maxLife: 150,
+        size: 1.5,
+        color: COLORS.red
+      });
+    }
   }
 }
 
@@ -611,6 +663,22 @@ function fireBlueLaser() {
       damage: weapons.blueLaser.damage,
       life: 2000
     });
+    
+    // Blue laser fire particles
+    for (let i = 0; i < 5; i++) {
+      const angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.5;
+      const speed = 300 + Math.random() * 200;
+      particles.push({
+        x: player.x,
+        y: player.y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 150,
+        maxLife: 150,
+        size: 1.5,
+        color: COLORS.blue
+      });
+    }
   }
 }
 
@@ -641,6 +709,20 @@ function updateProjectiles(scene, delta) {
     p.x += p.vx * delta / 1000;
     p.y += p.vy * delta / 1000;
     p.life -= delta;
+    
+    // Add trailing particles for lasers
+    if ((p.type === 'laser' || p.type === 'blueLaser') && Math.random() > 0.3) {
+      particles.push({
+        x: p.x,
+        y: p.y,
+        vx: (Math.random() - 0.5) * 20,
+        vy: (Math.random() - 0.5) * 20,
+        life: 100,
+        maxLife: 100,
+        size: 1.5,
+        color: p.type === 'laser' ? COLORS.red : COLORS.blue
+      });
+    }
     
     // Check missile distance traveled
     if (p.type === 'missile') {
@@ -746,7 +828,7 @@ function createSparks(x, y, count) {
       life: 300 + Math.random() * 200,
       maxLife: 300 + Math.random() * 200,
       size: 2 + Math.random() * 2,
-      color: 0xffaa00
+      color: Math.random() > 0.5 ? 0xffaa00 : 0xffff00
     });
   }
 }
@@ -763,7 +845,7 @@ function createDamageParticles(x, y, count) {
       life: 400 + Math.random() * 300,
       maxLife: 400 + Math.random() * 300,
       size: 3 + Math.random() * 3,
-      color: 0xff0000
+      color: Math.random() > 0.3 ? 0xff0000 : 0xff6666
     });
   }
 }
@@ -771,6 +853,23 @@ function createDamageParticles(x, y, count) {
 // ============================================================================
 // PARTICLE & VISUAL EFFECTS
 // ============================================================================
+
+function updateBackgroundParticles(delta) {
+  for (let p of backgroundParticles) {
+    p.x += p.vx * delta / 1000;
+    p.y += p.vy * delta / 1000;
+    
+    // Wrap around screen
+    if (p.x < 0) p.x = GAME_CONFIG.width;
+    if (p.x > GAME_CONFIG.width) p.x = 0;
+    if (p.y < 0) p.y = GAME_CONFIG.height;
+    if (p.y > GAME_CONFIG.height) p.y = 0;
+    
+    // Slight alpha pulsing
+    p.alpha += (Math.random() - 0.5) * 0.02;
+    p.alpha = Math.max(0.05, Math.min(0.4, p.alpha));
+  }
+}
 
 function updateParticles(delta) {
   for (let i = particles.length - 1; i >= 0; i--) {
@@ -821,6 +920,22 @@ function spawnBanana() {
     sprite: null,
     isBoss: false
   });
+  
+  // Spawn particles when banana appears
+  for (let i = 0; i < 8; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 50 + Math.random() * 50;
+    particles.push({
+      x: x,
+      y: y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 300,
+      maxLife: 300,
+      size: 2,
+      color: COLORS.yellow
+    });
+  }
 }
 
 function spawnMiniBoss() {
@@ -843,6 +958,22 @@ function spawnMiniBoss() {
     sprite: null,
     isBoss: true
   });
+  
+  // Big boss spawn effect
+  for (let i = 0; i < 30; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 100 + Math.random() * 100;
+    particles.push({
+      x: x,
+      y: y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 500,
+      maxLife: 500,
+      size: 3 + Math.random() * 2,
+      color: COLORS.orange
+    });
+  }
 }
 
 function updateBananas(delta) {
@@ -859,6 +990,20 @@ function updateBananas(delta) {
     // Keep bananas within play area
     b.x = Math.max(b.size, Math.min(800 - b.size, b.x));
     b.y = Math.max(b.size, Math.min(600 - b.size, b.y));
+    
+    // Emit trailing particles for bosses
+    if (b.isBoss && Math.random() > 0.7) {
+      particles.push({
+        x: b.x + (Math.random() - 0.5) * b.size,
+        y: b.y + (Math.random() - 0.5) * b.size,
+        vx: (Math.random() - 0.5) * 30,
+        vy: (Math.random() - 0.5) * 30,
+        life: 300,
+        maxLife: 300,
+        size: 2,
+        color: COLORS.orange
+      });
+    }
   }
 }
 
@@ -899,6 +1044,20 @@ function updateGems(scene) {
     const dy = player.y - g.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
     
+    // Emit sparkle particles from gems
+    if (Math.random() > 0.8) {
+      particles.push({
+        x: g.x + (Math.random() - 0.5) * 6,
+        y: g.y + (Math.random() - 0.5) * 6,
+        vx: (Math.random() - 0.5) * 30,
+        vy: (Math.random() - 0.5) * 30,
+        life: 200,
+        maxLife: 200,
+        size: 1,
+        color: COLORS.yellow
+      });
+    }
+    
     // Magnet effect
     if (dist < 100) {
       const len = Math.max(dist, 1);
@@ -911,6 +1070,22 @@ function updateGems(scene) {
       xp += g.value;
       gems.splice(i, 1);
       
+      // Gem collect particles
+      for (let j = 0; j < 8; j++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 50 + Math.random() * 50;
+        particles.push({
+          x: g.x,
+          y: g.y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 200,
+          maxLife: 200,
+          size: 1.5,
+          color: COLORS.yellow
+        });
+      }
+      
       // Level up every 10 XP
       if (xp >= level * 10) {
         levelUp(scene);
@@ -922,6 +1097,22 @@ function updateGems(scene) {
 function levelUp(scene) {
   level++;
   levelText.setText('LVL ' + level);
+  
+  // Level up particles burst!
+  for (let i = 0; i < 40; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 100 + Math.random() * 150;
+    particles.push({
+      x: player.x,
+      y: player.y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 600,
+      maxLife: 600,
+      size: 2 + Math.random() * 2,
+      color: Math.random() > 0.5 ? COLORS.cyan : COLORS.yellow
+    });
+  }
   
   // Unlock missile at level 5
   if (level === 5) {
@@ -996,6 +1187,12 @@ function checkCollisions(scene) {
 function draw() {
   graphics.clear();
   
+  // Draw background particles first (behind everything)
+  for (let p of backgroundParticles) {
+    graphics.fillStyle(p.color, p.alpha);
+    graphics.fillCircle(p.x, p.y, p.size);
+  }
+  
   // Draw play area border (darker)
   graphics.lineStyle(2, 0x00ffff, 0.3);
   graphics.strokeRect(0, 0, 800, 600);
@@ -1009,84 +1206,66 @@ function draw() {
     graphics.lineBetween(0, y, 800, y);
   }
   
-  // Draw player (cat face)
+  // Draw player (Japanese UFO)
   const px = player.x;
   const py = player.y;
   
-  // Cat head (circle)
-  graphics.fillStyle(0xff9933, 1);
-  graphics.fillCircle(px, py, player.size);
+  // UFO bottom dome (dark gray)
+  graphics.fillStyle(0x555555, 1);
+  graphics.fillEllipse(px, py + 6, player.size * 0.8, player.size * 0.4);
   
-  // Left ear (triangle)
-  graphics.fillStyle(0xff9933, 1);
-  graphics.fillTriangle(
-    px - 10, py - 10,
-    px - 16, py - 20,
-    px - 4, py - 16
-  );
+  // UFO main body/dome (silver/gray with gradient effect)
+  graphics.fillStyle(0xaaaaaa, 1);
+  graphics.fillEllipse(px, py, player.size * 1.2, player.size * 0.7);
   
-  // Right ear (triangle)
-  graphics.fillTriangle(
-    px + 10, py - 10,
-    px + 16, py - 20,
-    px + 4, py - 16
-  );
+  // Highlight on dome (bright silver)
+  graphics.fillStyle(0xeeeeee, 1);
+  graphics.fillEllipse(px - 3, py - 4, player.size * 0.6, player.size * 0.4);
   
-  // Inner ears (pink)
-  graphics.fillStyle(0xff66aa, 1);
-  graphics.fillTriangle(
-    px - 10, py - 10,
-    px - 13, py - 16,
-    px - 7, py - 14
-  );
-  graphics.fillTriangle(
-    px + 10, py - 10,
-    px + 13, py - 16,
-    px + 7, py - 14
-  );
+  // Top of dome (darker for depth)
+  graphics.fillStyle(0x888888, 1);
+  graphics.fillEllipse(px, py - 5, player.size * 0.5, player.size * 0.3);
   
-  // Left eye (white)
-  graphics.fillStyle(0xffffff, 1);
-  graphics.fillCircle(px - 6, py - 3, 4);
+  // Cockpit/window (cyan glow)
+  graphics.fillStyle(0x00ffff, 0.8);
+  graphics.fillCircle(px, py - 2, player.size * 0.35);
   
-  // Right eye (white)
-  graphics.fillCircle(px + 6, py - 3, 4);
+  // Cockpit detail (darker center)
+  graphics.fillStyle(0x00aaaa, 1);
+  graphics.fillCircle(px, py - 2, player.size * 0.2);
   
-  // Left pupil (black)
-  graphics.fillStyle(0x000000, 1);
-  graphics.fillCircle(px - 6, py - 2, 2);
+  // UFO ring/rim (metallic gold/yellow)
+  graphics.lineStyle(3, 0xffcc00, 1);
+  graphics.strokeEllipse(px, py + 2, player.size * 1.3, player.size * 0.5);
   
-  // Right pupil (black)
-  graphics.fillCircle(px + 6, py - 2, 2);
+  // Inner rim detail
+  graphics.lineStyle(2, 0xffdd44, 0.7);
+  graphics.strokeEllipse(px, py + 2, player.size * 1.1, player.size * 0.4);
   
-  // Nose (pink triangle)
-  graphics.fillStyle(0xff66aa, 1);
-  graphics.fillTriangle(
-    px, py + 2,
-    px - 2, py + 5,
-    px + 2, py + 5
-  );
+  // Bottom lights (red and blue alternating)
+  const lightPositions = [-10, -5, 0, 5, 10];
+  for (let i = 0; i < lightPositions.length; i++) {
+    const lightX = px + lightPositions[i];
+    const lightY = py + 8;
+    const lightColor = i % 2 === 0 ? 0xff0000 : 0x00ff00;
+    
+    // Light glow
+    graphics.fillStyle(lightColor, 0.5);
+    graphics.fillCircle(lightX, lightY, 3);
+    
+    // Light core
+    graphics.fillStyle(lightColor, 1);
+    graphics.fillCircle(lightX, lightY, 1.5);
+  }
   
-  // Mouth (two curves)
-  graphics.lineStyle(2, 0x000000, 1);
-  graphics.beginPath();
-  graphics.arc(px - 3, py + 5, 4, 0, Math.PI, false);
-  graphics.strokePath();
+  // Antenna on top (optional detail)
+  graphics.lineStyle(2, 0x888888, 1);
+  graphics.lineBetween(px, py - 10, px, py - 14);
   
-  graphics.beginPath();
-  graphics.arc(px + 3, py + 5, 4, 0, Math.PI, false);
-  graphics.strokePath();
-  
-  // Whiskers (left side)
-  graphics.lineStyle(1, 0x000000, 0.8);
-  graphics.lineBetween(px - 16, py, px - 8, py - 1);
-  graphics.lineBetween(px - 16, py + 3, px - 8, py + 2);
-  graphics.lineBetween(px - 16, py + 6, px - 8, py + 5);
-  
-  // Whiskers (right side)
-  graphics.lineBetween(px + 16, py, px + 8, py - 1);
-  graphics.lineBetween(px + 16, py + 3, px + 8, py + 2);
-  graphics.lineBetween(px + 16, py + 6, px + 8, py + 5);
+  // Antenna tip (blinking light)
+  const blinkColor = Math.floor(Date.now() / 200) % 2 === 0 ? 0xff0000 : 0xffff00;
+  graphics.fillStyle(blinkColor, 1);
+  graphics.fillCircle(px, py - 14, 2);
   
   // Draw explosions
   for (let e of explosions) {
@@ -1157,6 +1336,9 @@ function draw() {
     if (p.type === 'laser') {
       graphics.fillStyle(0xff0000, 1);
       graphics.fillRect(p.x - 3, p.y - 3, 6, 6);
+      // Add glow
+      graphics.fillStyle(0xff0000, 0.3);
+      graphics.fillCircle(p.x, p.y, 8);
     } else if (p.type === 'blueLaser') {
       graphics.fillStyle(0x00aaff, 1);
       graphics.fillRect(p.x - 3, p.y - 3, 6, 6);
@@ -1190,8 +1372,15 @@ function draw() {
   
   // Draw gems (XP)
   for (let g of gems) {
+    // Gem glow
+    graphics.fillStyle(0xF9BC13, 0.4);
+    graphics.fillCircle(g.x, g.y, 6);
+    // Gem core
     graphics.fillStyle(0xF9BC13, 1);
     graphics.fillCircle(g.x, g.y, 4);
+    // Bright center
+    graphics.fillStyle(0xFCD470, 1);
+    graphics.fillCircle(g.x, g.y, 2);
   }
   
   // Update HP bar (glowing)
@@ -1244,15 +1433,53 @@ function updateTimer() {
 // GAME STATE MANAGEMENT
 // ============================================================================
 
+function loadLeaderboard() {
+  try {
+    const saved = localStorage.getItem('platanus_survivor_leaderboard');
+    if (saved) {
+      leaderboard = JSON.parse(saved);
+    } else {
+      leaderboard = [];
+    }
+  } catch (e) {
+    leaderboard = [];
+  }
+}
+
+function saveLeaderboard() {
+  try {
+    localStorage.setItem('platanus_survivor_leaderboard', JSON.stringify(leaderboard));
+  } catch (e) {
+    // Silent fail if localStorage is not available
+  }
+}
+
+function addToLeaderboard(newScore, time) {
+  leaderboard.push({ score: newScore, time: time, date: Date.now() });
+  
+  // Sort by score (descending)
+  leaderboard.sort((a, b) => b.score - a.score);
+  
+  // Keep only top entries
+  if (leaderboard.length > MAX_LEADERBOARD_ENTRIES) {
+    leaderboard = leaderboard.slice(0, MAX_LEADERBOARD_ENTRIES);
+  }
+  
+  saveLeaderboard();
+}
+
 function endGame(scene) {
   gameOver = true;
+  
+  // Add current score to leaderboard
+  addToLeaderboard(score, gameDuration);
   
   const overlay = scene.add.graphics();
   overlay.fillStyle(0x000000, 0.8);
   overlay.fillRect(0, 0, 800, 600);
   
   // ASCII "GAME OVER"
-  scene.add.text(400, 180, 
+  scene.add.text(400, 100, 
     ' ██████╗  █████╗ ███╗   ███╗███████╗     ██████╗ ██╗   ██╗███████╗██████╗ \n' +
     '██╔════╝ ██╔══██╗████╗ ████║██╔════╝    ██╔═══██╗██║   ██║██╔════╝██╔══██╗\n' +
     '██║  ███╗███████║██╔████╔██║█████╗      ██║   ██║██║   ██║█████╗  ██████╔╝\n' +
@@ -1266,7 +1493,7 @@ function endGame(scene) {
     lineSpacing: -2
   }).setOrigin(0.5);
   
-  scene.add.text(400, 340, 'SCORE: ' + score, {
+  scene.add.text(400, 210, 'SCORE: ' + score, {
     fontSize: '32px',
     fontFamily: 'Consolas, monospace',
     color: '#ffffff',
@@ -1276,15 +1503,53 @@ function endGame(scene) {
   
   const mins = Math.floor(gameDuration / 60000);
   const secs = Math.floor((gameDuration % 60000) / 1000);
-  scene.add.text(400, 390, 'TIME: ' + mins + ':' + (secs < 10 ? '0' : '') + secs, {
+  scene.add.text(400, 250, 'TIME: ' + mins + ':' + (secs < 10 ? '0' : '') + secs, {
     fontSize: '24px',
     fontFamily: 'Consolas, monospace',
     color: '#ffffff'
   }).setOrigin(0.5);
   
+  // Leaderboard title
+  scene.add.text(400, 295, '═══ LEADERBOARD ═══', {
+    fontSize: '18px',
+    fontFamily: 'Consolas, monospace',
+    color: '#F9BC13',
+    stroke: '#000000',
+    strokeThickness: 3
+  }).setOrigin(0.5);
+  
+  // Display leaderboard entries
+  const startY = 325;
+  const lineHeight = 22;
+  const maxDisplay = Math.min(8, leaderboard.length);
+  
+  for (let i = 0; i < maxDisplay; i++) {
+    const entry = leaderboard[i];
+    const rank = i + 1;
+    const entryMins = Math.floor(entry.time / 60000);
+    const entrySecs = Math.floor((entry.time % 60000) / 1000);
+    const timeStr = entryMins + ':' + (entrySecs < 10 ? '0' : '') + entrySecs;
+    
+    // Highlight current score
+    const isCurrentScore = i === 0 || (entry.score === score && entry.time === gameDuration);
+    const color = isCurrentScore ? '#00ffff' : '#ffffff';
+    const fontSize = isCurrentScore ? '16px' : '14px';
+    
+    // Rank and score
+    const text = `${rank}. ${entry.score.toString().padStart(6, ' ')}  ${timeStr}`;
+    
+    scene.add.text(400, startY + i * lineHeight, text, {
+      fontSize: fontSize,
+      fontFamily: 'Consolas, monospace',
+      color: color,
+      stroke: '#000000',
+      strokeThickness: 2
+    }).setOrigin(0.5);
+  }
+  
   // Restart button
-  const restartBtn = scene.add.text(400, 480, 'RESTART', {
-    fontSize: '32px',
+  const restartBtn = scene.add.text(400, 545, 'RESTART', {
+    fontSize: '28px',
     fontFamily: 'Consolas, monospace',
     color: '#ffffff',
     stroke: '#000000',
@@ -1339,6 +1604,20 @@ function resetGame() {
   spawnRate = 500;
   waveLevel = 1;
   miniBossSpawned = false;
+  
+  // Reinitialize background particles
+  backgroundParticles = [];
+  for (let i = 0; i < 100; i++) {
+    backgroundParticles.push({
+      x: Math.random() * GAME_CONFIG.width,
+      y: Math.random() * GAME_CONFIG.height,
+      vx: (Math.random() - 0.5) * 20,
+      vy: (Math.random() - 0.5) * 20,
+      size: Math.random() * 2 + 0.5,
+      alpha: Math.random() * 0.3 + 0.1,
+      color: Math.random() > 0.5 ? COLORS.cyan : COLORS.yellow
+    });
+  }
   
   weapons.laser.active = true;
   weapons.laser.level = 1;
