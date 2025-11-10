@@ -33,19 +33,25 @@ const GAME_CONFIG = {
   magnetSpeed: 200,
   initialSpawnRate: 500,
   minSpawnRate: 100,
-  difficultyScaleInterval: 15000,
-  easyModeTime: 45000
+  feverThreshold: 5,
+  feverDuration: 3000,
+  feverMagnetBonus: 100
 };
 
 const WEAPON_CONFIG = {
-  laser: { damage: 15, rate: 1000, speed: 600, minRate: 300 },
-  blueLaser: { damage: 20, rate: 800, speed: 600, minRate: 300 },
-  missile: { damage: 30, rate: 3000, range: 150, explosionRadius: 50, speed: 250, minRate: 1500 }
+  laser: { damage: 15, rate: 400, speed: 600, minRate: 150 },
+  blueLaser: { damage: 20, rate: 350, speed: 600, minRate: 150 },
+  missile: { damage: 30, rate: 1500, range: 150, explosionRadius: 35, speed: 250, minRate: 800 },
+  tripleShot: { damage: 12, rate: 500, speed: 600, minRate: 200 },
+  pulseWave: { damage: 25, rate: 1200, range: 50, minRate: 600 },
+  rapidFire: { damage: 8, rate: 150, speed: 700, minRate: 80 }
 };
 
 const ENEMY_CONFIG = {
-  normal: { size: 16, hitbox: 6, baseSpeed: 30, speedVariance: 20, baseHp: 10, scoreValue: 10, gemDrop: 1 },
-  boss: { size: 40, hitbox: 18, speed: 25, hp: 500, scoreValue: 100, gemDrop: 10, scale: 2.5 }
+  normal: { size: 16, hitbox: 6, baseSpeed: 50, speedVariance: 30, baseHp: 10, scoreValue: 10, gemDrop: 1 },
+  boss: { size: 40, hitbox: 18, speed: 25, hp: 500, scoreValue: 100, gemDrop: 10, scale: 2.5 },
+  red: { size: 18, hitbox: 7, baseSpeed: 70, speedVariance: 40, baseHp: 15, scoreValue: 20, gemDrop: 2 },
+  blue: { size: 24, hitbox: 10, baseSpeed: 40, speedVariance: 20, baseHp: 40, scoreValue: 50, gemDrop: 5 }
 };
 
 const COLORS = {
@@ -58,7 +64,9 @@ const COLORS = {
   catOrange: 0xff9933,
   catPink: 0xff66aa,
   white: 0xffffff,
-  black: 0x000000
+  black: 0x000000,
+  green: 0x00ff00,
+  darkGreen: 0x00aa00
 };
 
 // ============================================================================
@@ -187,6 +195,18 @@ let gameOver = false;
 let gameStarted = false;
 let miniBossSpawned = false;
 
+// Magnet and Fever mode
+let magnetActive = false;
+let magnetRange = GAME_CONFIG.magnetRange;
+let feverMode = false;
+let feverTimer = 0;
+let recentGemCollects = [];
+
+// Background music
+let bgMusicOscillators = [];
+let bgMusicGains = [];
+let bgMusicPlaying = false;
+
 // Leaderboard
 let leaderboard = [];
 const MAX_LEADERBOARD_ENTRIES = 10;
@@ -194,7 +214,6 @@ const MAX_LEADERBOARD_ENTRIES = 10;
 // Enemy spawning
 let spawnTimer = 0;
 let spawnRate = GAME_CONFIG.initialSpawnRate;
-let waveLevel = 1;
 
 // UI elements
 let scoreText;
@@ -207,7 +226,10 @@ let xpBar;
 let weapons = {
   laser: { active: false, level: 0, damage: WEAPON_CONFIG.laser.damage, cooldown: 0, rate: WEAPON_CONFIG.laser.rate },
   missile: { active: false, level: 0, damage: WEAPON_CONFIG.missile.damage, cooldown: 0, rate: WEAPON_CONFIG.missile.rate, range: WEAPON_CONFIG.missile.range, explosionRadius: WEAPON_CONFIG.missile.explosionRadius },
-  blueLaser: { active: false, level: 0, damage: WEAPON_CONFIG.blueLaser.damage, cooldown: 0, rate: WEAPON_CONFIG.blueLaser.rate }
+  blueLaser: { active: false, level: 0, damage: WEAPON_CONFIG.blueLaser.damage, cooldown: 0, rate: WEAPON_CONFIG.blueLaser.rate },
+  tripleShot: { active: false, level: 0, damage: WEAPON_CONFIG.tripleShot.damage, cooldown: 0, rate: WEAPON_CONFIG.tripleShot.rate },
+  pulseWave: { active: false, level: 0, damage: WEAPON_CONFIG.pulseWave.damage, cooldown: 0, rate: WEAPON_CONFIG.pulseWave.rate, range: WEAPON_CONFIG.pulseWave.range },
+  rapidFire: { active: false, level: 0, damage: WEAPON_CONFIG.rapidFire.damage, cooldown: 0, rate: WEAPON_CONFIG.rapidFire.rate }
 };
 
 // ============================================================================
@@ -318,7 +340,7 @@ function create() {
 
   // XP bar
   const xpBg = this.add.graphics();
-  xpBg.fillStyle(0x001a33, 0.8);
+  xpBg.fillStyle(0x003300, 0.8);
   xpBg.fillRect(20, 583, 204, 10);
   xpBg.setDepth(100);
   
@@ -406,11 +428,11 @@ function create() {
     strokeThickness: 4
   }).setOrigin(0.5).setDepth(1001);
   
-  // Blinking animation
+  // Blinking animation (faster and more energetic)
   scene.tweens.add({
     targets: pressStart,
-    alpha: { from: 1, to: 0.3 },
-    duration: 600,
+    alpha: { from: 1, to: 0.2 },
+    duration: 400,
     yoyo: true,
     repeat: -1
   });
@@ -432,6 +454,7 @@ function create() {
     bananaArt.destroy();
     pressStart.destroy();
     controls.destroy();
+    startBackgroundMusic(this);
     playMeow(this);
   });
 
@@ -448,6 +471,9 @@ function update(time, delta) {
   gameDuration += delta;
   updateTimer();
 
+  // Update fever mode
+  updateFeverMode(delta);
+
   // Update systems
   updatePlayerMovement(delta);
   updateBackgroundParticles(delta);
@@ -459,7 +485,6 @@ function update(time, delta) {
   updateExplosions(delta);
   updateGems(this);
   checkCollisions(this);
-  updateDifficulty();
 
   // Add player movement particles
   if ((player.vx !== 0 || player.vy !== 0) && Math.random() > 0.5) {
@@ -516,17 +541,11 @@ function updatePlayerMovement(delta) {
 
 function updateSpawning(delta) {
   spawnTimer += delta;
-  const currentSpawnRate = gameDuration < GAME_CONFIG.easyModeTime ? spawnRate * 2 : spawnRate;
   
-  let adjustedSpawnRate = currentSpawnRate;
-  if (level >= 20) {
-    const levelPast20 = level - 20;
-    const speedMultiplier = Math.pow(0.85, levelPast20);
-    adjustedSpawnRate = currentSpawnRate * speedMultiplier;
-    adjustedSpawnRate = Math.max(GAME_CONFIG.minSpawnRate, adjustedSpawnRate);
-  }
+  // Spawn rate based on level (not time)
+  const levelBasedSpawnRate = Math.max(GAME_CONFIG.minSpawnRate, GAME_CONFIG.initialSpawnRate - (level * 15));
   
-  if (spawnTimer >= adjustedSpawnRate) {
+  if (spawnTimer >= levelBasedSpawnRate) {
     spawnTimer = 0;
     spawnBanana();
   }
@@ -543,11 +562,6 @@ function updateSpawning(delta) {
       setTimeout(() => { miniBossSpawned = false; }, 2000);
     }
   }
-}
-
-function updateDifficulty() {
-  waveLevel = 1 + Math.floor(gameDuration / GAME_CONFIG.difficultyScaleInterval);
-  spawnRate = Math.max(200, GAME_CONFIG.initialSpawnRate - waveLevel * 30);
 }
 
 // ============================================================================
@@ -576,6 +590,30 @@ function updateWeapons(scene, delta) {
     if (weapons.blueLaser.cooldown <= 0) {
       weapons.blueLaser.cooldown = weapons.blueLaser.rate;
       fireBlueLaser();
+    }
+  }
+  
+  if (weapons.tripleShot.active) {
+    weapons.tripleShot.cooldown -= delta;
+    if (weapons.tripleShot.cooldown <= 0) {
+      weapons.tripleShot.cooldown = weapons.tripleShot.rate;
+      fireTripleShot();
+    }
+  }
+  
+  if (weapons.pulseWave.active) {
+    weapons.pulseWave.cooldown -= delta;
+    if (weapons.pulseWave.cooldown <= 0) {
+      weapons.pulseWave.cooldown = weapons.pulseWave.rate;
+      firePulseWave(scene);
+    }
+  }
+  
+  if (weapons.rapidFire.active) {
+    weapons.rapidFire.cooldown -= delta;
+    if (weapons.rapidFire.cooldown <= 0) {
+      weapons.rapidFire.cooldown = weapons.rapidFire.rate;
+      fireRapidFire();
     }
   }
 }
@@ -683,7 +721,27 @@ function fireBlueLaser() {
 }
 
 function fireMissile() {
-  const angle = player.facingAngle;
+  if (bananas.length === 0) return;
+  
+  // Find nearest banana
+  let nearest = null;
+  let minDist = Infinity;
+  
+  for (let b of bananas) {
+    const dx = b.x - player.x;
+    const dy = b.y - player.y;
+    const dist = dx * dx + dy * dy;
+    if (dist < minDist) {
+      minDist = dist;
+      nearest = b;
+    }
+  }
+  
+  if (!nearest) return;
+  
+  const dx = nearest.x - player.x;
+  const dy = nearest.y - player.y;
+  const angle = Math.atan2(dy, dx);
   const distance = weapons.missile.range;
   const targetX = player.x + Math.cos(angle) * distance;
   const targetY = player.y + Math.sin(angle) * distance;
@@ -701,6 +759,162 @@ function fireMissile() {
     life: 2000,
     traveled: 0
   });
+}
+
+function fireTripleShot() {
+  if (bananas.length === 0) return;
+  
+  // Find nearest banana
+  let nearest = null;
+  let minDist = Infinity;
+  
+  for (let b of bananas) {
+    const dx = b.x - player.x;
+    const dy = b.y - player.y;
+    const dist = dx * dx + dy * dy;
+    if (dist < minDist) {
+      minDist = dist;
+      nearest = b;
+    }
+  }
+  
+  if (nearest) {
+    const dx = nearest.x - player.x;
+    const dy = nearest.y - player.y;
+    const baseAngle = Math.atan2(dy, dx);
+    
+    // Fire 3 shots in a spread
+    const spreadAngles = [-0.2, 0, 0.2];
+    for (let angleOffset of spreadAngles) {
+      const angle = baseAngle + angleOffset;
+      projectiles.push({
+        x: player.x,
+        y: player.y,
+        vx: Math.cos(angle) * 600,
+        vy: Math.sin(angle) * 600,
+        type: 'tripleShot',
+        damage: weapons.tripleShot.damage,
+        life: 2000
+      });
+    }
+    
+    // Triple shot particles
+    for (let i = 0; i < 8; i++) {
+      const angle = baseAngle + (Math.random() - 0.5) * 0.8;
+      const speed = 200 + Math.random() * 150;
+      particles.push({
+        x: player.x,
+        y: player.y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 150,
+        maxLife: 150,
+        size: 1.5,
+        color: 0xff00ff
+      });
+    }
+  }
+}
+
+function firePulseWave(scene) {
+  // Debug: log the actual range value
+  console.log('Pulse wave range:', weapons.pulseWave.range);
+  
+  // Create expanding wave that damages all enemies in range
+  explosions.push({
+    x: player.x,
+    y: player.y,
+    radius: 0,
+    maxRadius: weapons.pulseWave.range,
+    life: 400,
+    maxLife: 400,
+    isPulseWave: true
+  });
+  
+  // Damage enemies in range
+  for (let i = bananas.length - 1; i >= 0; i--) {
+    const b = bananas[i];
+    const dx = b.x - player.x;
+    const dy = b.y - player.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    
+    if (dist < weapons.pulseWave.range) {
+      b.hp -= weapons.pulseWave.damage;
+      if (b.hp <= 0) {
+        killBanana(scene, i);
+      } else {
+        createSparks(b.x, b.y, 5);
+      }
+    }
+  }
+  
+  // Pulse wave particles
+  for (let i = 0; i < 30; i++) {
+    const angle = (i / 30) * Math.PI * 2;
+    const speed = 200;
+    particles.push({
+      x: player.x,
+      y: player.y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 400,
+      maxLife: 400,
+      size: 2,
+      color: 0x00ff00
+    });
+  }
+  
+  playTone(scene, 300, 0.15);
+}
+
+function fireRapidFire() {
+  if (bananas.length === 0) return;
+  
+  // Find nearest banana
+  let nearest = null;
+  let minDist = Infinity;
+  
+  for (let b of bananas) {
+    const dx = b.x - player.x;
+    const dy = b.y - player.y;
+    const dist = dx * dx + dy * dy;
+    if (dist < minDist) {
+      minDist = dist;
+      nearest = b;
+    }
+  }
+  
+  if (nearest) {
+    const dx = nearest.x - player.x;
+    const dy = nearest.y - player.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    
+    projectiles.push({
+      x: player.x,
+      y: player.y,
+      vx: (dx / len) * 700,
+      vy: (dy / len) * 700,
+      type: 'rapidFire',
+      damage: weapons.rapidFire.damage,
+      life: 2000
+    });
+    
+    // Rapid fire particles (small burst)
+    for (let i = 0; i < 3; i++) {
+      const angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.3;
+      const speed = 400 + Math.random() * 100;
+      particles.push({
+        x: player.x,
+        y: player.y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 100,
+        maxLife: 100,
+        size: 1,
+        color: 0xffff00
+      });
+    }
+  }
 }
 
 function updateProjectiles(scene, delta) {
@@ -724,6 +938,33 @@ function updateProjectiles(scene, delta) {
       });
     }
     
+    // Add trailing particles for new weapons
+    if (p.type === 'tripleShot' && Math.random() > 0.5) {
+      particles.push({
+        x: p.x,
+        y: p.y,
+        vx: (Math.random() - 0.5) * 15,
+        vy: (Math.random() - 0.5) * 15,
+        life: 100,
+        maxLife: 100,
+        size: 1,
+        color: 0xff00ff
+      });
+    }
+    
+    if (p.type === 'rapidFire' && Math.random() > 0.6) {
+      particles.push({
+        x: p.x,
+        y: p.y,
+        vx: (Math.random() - 0.5) * 10,
+        vy: (Math.random() - 0.5) * 10,
+        life: 80,
+        maxLife: 80,
+        size: 1,
+        color: 0xffff00
+      });
+    }
+    
     // Check missile distance traveled
     if (p.type === 'missile') {
       const dx = p.x - player.x;
@@ -739,7 +980,7 @@ function updateProjectiles(scene, delta) {
     }
     
     // Remove lasers if out of bounds or expired
-    if ((p.type === 'laser' || p.type === 'blueLaser') && (p.x < 0 || p.x > 800 || p.y < 0 || p.y > 600 || p.life <= 0)) {
+    if ((p.type === 'laser' || p.type === 'blueLaser' || p.type === 'tripleShot' || p.type === 'rapidFire') && (p.x < 0 || p.x > 800 || p.y < 0 || p.y > 600 || p.life <= 0)) {
       projectiles.splice(i, 1);
       continue;
     }
@@ -760,7 +1001,7 @@ function updateProjectiles(scene, delta) {
           createSparks(p.x, p.y, 5);
         }
         
-        if (p.type === 'laser' || p.type === 'blueLaser') {
+        if (p.type === 'laser' || p.type === 'blueLaser' || p.type === 'tripleShot' || p.type === 'rapidFire') {
           projectiles.splice(i, 1);
         } else if (p.type === 'missile') {
           createExplosion(scene, p.x, p.y, p.explosionRadius, p.damage);
@@ -773,6 +1014,8 @@ function updateProjectiles(scene, delta) {
 }
 
 function createExplosion(scene, x, y, radius, damage) {
+  console.log('Creating explosion - radius:', radius, 'at level:', level, 'missile explosionRadius:', weapons.missile.explosionRadius);
+  
   // Create visual explosion
   explosions.push({
     x: x,
@@ -901,27 +1144,51 @@ function spawnBanana() {
   else if (side === 2) { x = Math.random() * 800; y = -20; }
   else { x = Math.random() * 800; y = 620; }
   
-  let speedMult = 1 + (waveLevel - 1) * 0.15;
+  // Determine banana type based on level
+  let bananaType = 'normal';
+  const rand = Math.random() * 100;
   
-  // Exponential speed increase at level 20+
-  if (level >= 20) {
-    const levelPast20 = level - 20;
-    speedMult *= 1 + (levelPast20 * 0.12); // +12% speed per level past 20
+  // Red bananas start appearing at level 5 (fast & aggressive)
+  if (level >= 5 && rand < 10 + (level * 2)) {
+    bananaType = 'red';
   }
+  
+  // Blue bananas start appearing at level 15 (tanky)
+  if (level >= 15 && rand < 5 + level) {
+    bananaType = 'blue';
+  }
+  
+  const config = ENEMY_CONFIG[bananaType];
+  
+  // Scalable speed from level 1 to 100+
+  const levelSpeedBonus = Math.min(level * 1.5, 150);
+  const baseSpeed = config.baseSpeed + levelSpeedBonus;
+  
+  // Random speed variance
+  const speedMultiplier = 0.3 + Math.random() * 0.7;
+  const variance = Math.random() * config.speedVariance;
+  const finalSpeed = (baseSpeed * speedMultiplier) + variance;
+  
+  // HP scales with level
+  const hpScaling = 1 + (level * 0.3);
   
   bananas.push({
     x: x,
     y: y,
-    size: 16,
-    hitboxSize: 6,
-    speed: (30 + Math.random() * 20) * speedMult,
-    hp: 10 + waveLevel * 2,
-    maxHp: 10 + waveLevel * 2,
+    size: config.size,
+    hitboxSize: config.hitbox,
+    speed: finalSpeed,
+    hp: Math.floor(config.baseHp * hpScaling),
+    maxHp: Math.floor(config.baseHp * hpScaling),
     sprite: null,
-    isBoss: false
+    isBoss: false,
+    type: bananaType,
+    scoreValue: config.scoreValue,
+    gemDrop: config.gemDrop
   });
   
   // Spawn particles when banana appears
+  const particleColor = bananaType === 'red' ? COLORS.red : bananaType === 'blue' ? COLORS.blue : COLORS.yellow;
   for (let i = 0; i < 8; i++) {
     const angle = Math.random() * Math.PI * 2;
     const speed = 50 + Math.random() * 50;
@@ -933,7 +1200,7 @@ function spawnBanana() {
       life: 300,
       maxLife: 300,
       size: 2,
-      color: COLORS.yellow
+      color: particleColor
     });
   }
 }
@@ -1009,7 +1276,7 @@ function updateBananas(delta) {
 
 function killBanana(scene, index) {
   const b = bananas[index];
-  const scoreValue = b.isBoss ? 100 : 10;
+  const scoreValue = b.isBoss ? 100 : (b.scoreValue || 10);
   score += scoreValue;
   scoreText.setText(score.toString());
   
@@ -1019,10 +1286,11 @@ function killBanana(scene, index) {
   }
   
   // Create death explosion sparks (more for boss)
-  createSparks(b.x, b.y, b.isBoss ? 20 : 8);
+  const sparkColor = b.type === 'red' ? COLORS.red : b.type === 'blue' ? COLORS.blue : COLORS.yellow;
+  createSparks(b.x, b.y, b.isBoss ? 20 : 8, sparkColor);
   
-  // Drop more gems for boss
-  const gemCount = b.isBoss ? 10 : 1;
+  // Drop gems
+  const gemCount = b.isBoss ? 10 : (b.gemDrop || 1);
   for (let i = 0; i < gemCount; i++) {
     const offsetX = (Math.random() - 0.5) * 20;
     const offsetY = (Math.random() - 0.5) * 20;
@@ -1036,6 +1304,26 @@ function killBanana(scene, index) {
 // ============================================================================
 // PROGRESSION SYSTEMS
 // ============================================================================
+
+function updateFeverMode(delta) {
+  // Clean up old gem collect timestamps
+  const now = Date.now();
+  recentGemCollects = recentGemCollects.filter(time => now - time < 2000);
+  
+  // Update fever timer
+  if (feverMode) {
+    feverTimer -= delta;
+    if (feverTimer <= 0) {
+      feverMode = false;
+    }
+  } else {
+    // Check if we should enter fever mode
+    if (recentGemCollects.length >= GAME_CONFIG.feverThreshold) {
+      feverMode = true;
+      feverTimer = GAME_CONFIG.feverDuration;
+    }
+  }
+}
 
 function updateGems(scene) {
   for (let i = gems.length - 1; i >= 0; i--) {
@@ -1054,15 +1342,21 @@ function updateGems(scene) {
         life: 200,
         maxLife: 200,
         size: 1,
-        color: COLORS.yellow
+        color: COLORS.green
       });
     }
     
-    // Magnet effect
-    if (dist < 100) {
+    // Magnet effect - increased range if magnet is active or in fever mode
+    let effectiveMagnetRange = magnetActive ? magnetRange : 0;
+    if (feverMode) {
+      effectiveMagnetRange += GAME_CONFIG.feverMagnetBonus;
+    }
+    
+    if (dist < effectiveMagnetRange) {
       const len = Math.max(dist, 1);
-      g.x += (dx / len) * 200 * 0.016;
-      g.y += (dy / len) * 200 * 0.016;
+      const magnetSpeed = feverMode ? GAME_CONFIG.magnetSpeed * 2 : GAME_CONFIG.magnetSpeed;
+      g.x += (dx / len) * magnetSpeed * 0.016;
+      g.y += (dy / len) * magnetSpeed * 0.016;
     }
     
     // Collect
@@ -1070,7 +1364,13 @@ function updateGems(scene) {
       xp += g.value;
       gems.splice(i, 1);
       
-      // Gem collect particles
+      // XP collect sound
+      playXPCollectSound(scene);
+      
+      // Track gem collection for fever mode
+      recentGemCollects.push(Date.now());
+      
+      // Gem collect particles (green)
       for (let j = 0; j < 8; j++) {
         const angle = Math.random() * Math.PI * 2;
         const speed = 50 + Math.random() * 50;
@@ -1082,7 +1382,7 @@ function updateGems(scene) {
           life: 200,
           maxLife: 200,
           size: 1.5,
-          color: COLORS.yellow
+          color: COLORS.green
         });
       }
       
@@ -1097,6 +1397,28 @@ function updateGems(scene) {
 function levelUp(scene) {
   level++;
   levelText.setText('LVL ' + level);
+  
+  // HP bonus every 10 levels
+  if (level % 10 === 0) {
+    const hpBonus = 20;
+    hp = Math.min(hp + hpBonus, 200); // Cap at 200 HP
+    
+    // HP bonus particles
+    for (let i = 0; i < 25; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 80 + Math.random() * 100;
+      particles.push({
+        x: player.x,
+        y: player.y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 500,
+        maxLife: 500,
+        size: 2 + Math.random() * 1,
+        color: 0x00ff00
+      });
+    }
+  }
   
   // Level up particles burst!
   for (let i = 0; i < 40; i++) {
@@ -1114,20 +1436,49 @@ function levelUp(scene) {
     });
   }
   
-  // Unlock missile at level 5
+  // Milestone weapon unlocks
   if (level === 5) {
     weapons.missile.active = true;
     weapons.missile.level = 1;
   } else if (level === 10) {
-    // Unlock blue laser at level 10
     weapons.blueLaser.active = true;
     weapons.blueLaser.level = 1;
+  } else if (level === 25) {
+    // Unlock magnet
+    magnetActive = true;
+    magnetRange = 150;
+  } else if (level === 30) {
+    weapons.tripleShot.active = true;
+    weapons.tripleShot.level = 1;
+  } else if (level === 40) {
+    weapons.pulseWave.active = true;
+    weapons.pulseWave.level = 1;
+  } else if (level === 50) {
+    weapons.rapidFire.active = true;
+    weapons.rapidFire.level = 1;
+  } else if (level === 60) {
+    // Mega damage boost
+    weapons.laser.damage += 20;
+    weapons.blueLaser.damage += 20;
+    weapons.missile.damage += 30;
+  } else if (level === 70) {
+    // Mega fire rate boost
+    weapons.laser.rate = Math.max(100, weapons.laser.rate - 150);
+    weapons.blueLaser.rate = Math.max(100, weapons.blueLaser.rate - 150);
+    weapons.tripleShot.rate = Math.max(150, weapons.tripleShot.rate - 200);
+    weapons.rapidFire.rate = Math.max(60, weapons.rapidFire.rate - 50);
+  } else if (level === 80) {
+    // Ultimate boost - missile explosion stays at base size
+    // Pulse wave stays at base range
   } else {
     // Random upgrade for other levels
     const upgrades = [];
-    if (weapons.laser.level < 10) upgrades.push('laser+');
-    if (weapons.missile.active && weapons.missile.level < 10) upgrades.push('missile+');
-    if (weapons.blueLaser.active && weapons.blueLaser.level < 10) upgrades.push('blueLaser+');
+    if (weapons.laser.level < 15) upgrades.push('laser+');
+    if (weapons.missile.active && weapons.missile.level < 15) upgrades.push('missile+');
+    if (weapons.blueLaser.active && weapons.blueLaser.level < 15) upgrades.push('blueLaser+');
+    if (weapons.tripleShot.active && weapons.tripleShot.level < 15) upgrades.push('tripleShot+');
+    if (weapons.pulseWave.active && weapons.pulseWave.level < 15) upgrades.push('pulseWave+');
+    if (weapons.rapidFire.active && weapons.rapidFire.level < 15) upgrades.push('rapidFire+');
     
     if (upgrades.length > 0) {
       const choice = upgrades[Math.floor(Math.random() * upgrades.length)];
@@ -1142,16 +1493,29 @@ function applyUpgrade(upgrade) {
   if (upgrade === 'laser+') {
     weapons.laser.level++;
     weapons.laser.damage += 5;
-    weapons.laser.rate = Math.max(300, weapons.laser.rate - 100);
+    weapons.laser.rate = Math.max(150, weapons.laser.rate - 30);
   } else if (upgrade === 'missile+') {
     weapons.missile.level++;
     weapons.missile.damage += 10;
-    weapons.missile.explosionRadius += 10;
-    weapons.missile.rate = Math.max(1500, weapons.missile.rate - 200);
+    // Explosion radius stays fixed - only damage and rate improve
+    weapons.missile.rate = Math.max(800, weapons.missile.rate - 80);
   } else if (upgrade === 'blueLaser+') {
     weapons.blueLaser.level++;
     weapons.blueLaser.damage += 5;
-    weapons.blueLaser.rate = Math.max(300, weapons.blueLaser.rate - 80);
+    weapons.blueLaser.rate = Math.max(150, weapons.blueLaser.rate - 25);
+  } else if (upgrade === 'tripleShot+') {
+    weapons.tripleShot.level++;
+    weapons.tripleShot.damage += 4;
+    weapons.tripleShot.rate = Math.max(200, weapons.tripleShot.rate - 35);
+  } else if (upgrade === 'pulseWave+') {
+    weapons.pulseWave.level++;
+    weapons.pulseWave.damage += 8;
+    // Range stays at 50 - only damage and rate improve
+    weapons.pulseWave.rate = Math.max(600, weapons.pulseWave.rate - 70);
+  } else if (upgrade === 'rapidFire+') {
+    weapons.rapidFire.level++;
+    weapons.rapidFire.damage += 3;
+    weapons.rapidFire.rate = Math.max(80, weapons.rapidFire.rate - 10);
   }
 }
 
@@ -1196,6 +1560,8 @@ function draw() {
   // Draw play area border (darker)
   graphics.lineStyle(2, 0x00ffff, 0.3);
   graphics.strokeRect(0, 0, 800, 600);
+  
+  // Draw magnet range indicator removed - magnet still works but no visual circle
   
   // Draw grid (subtle)
   graphics.lineStyle(1, 0x00ffff, 0.05);
@@ -1270,16 +1636,25 @@ function draw() {
   // Draw explosions
   for (let e of explosions) {
     const alpha = e.life / e.maxLife;
-    // Outer ring (orange)
-    graphics.lineStyle(3, 0xff6600, alpha);
-    graphics.strokeCircle(e.x, e.y, e.radius);
-    // Middle ring (yellow)
-    graphics.lineStyle(2, 0xffff00, alpha * 0.7);
-    graphics.strokeCircle(e.x, e.y, e.radius * 0.7);
-    // Inner flash (white)
-    if (alpha > 0.5) {
-      graphics.fillStyle(0xffffff, (alpha - 0.5) * 2);
-      graphics.fillCircle(e.x, e.y, e.radius * 0.3);
+    
+    if (e.isPulseWave) {
+      // Pulse wave effect (green)
+      graphics.lineStyle(4, 0x00ff00, alpha * 0.8);
+      graphics.strokeCircle(e.x, e.y, e.radius);
+      graphics.lineStyle(2, 0x00ffaa, alpha * 0.5);
+      graphics.strokeCircle(e.x, e.y, e.radius * 0.8);
+    } else {
+      // Regular explosion (orange/yellow)
+      graphics.lineStyle(3, 0xff6600, alpha);
+      graphics.strokeCircle(e.x, e.y, e.radius);
+      // Middle ring (yellow)
+      graphics.lineStyle(2, 0xffff00, alpha * 0.7);
+      graphics.strokeCircle(e.x, e.y, e.radius * 0.7);
+      // Inner flash (white)
+      if (alpha > 0.5) {
+        graphics.fillStyle(0xffffff, (alpha - 0.5) * 2);
+        graphics.fillCircle(e.x, e.y, e.radius * 0.3);
+      }
     }
   }
   
@@ -1345,6 +1720,18 @@ function draw() {
       // Blue glow
       graphics.fillStyle(0x00aaff, 0.3);
       graphics.fillRect(p.x - 5, p.y - 5, 10, 10);
+    } else if (p.type === 'tripleShot') {
+      graphics.fillStyle(0xff00ff, 1);
+      graphics.fillCircle(p.x, p.y, 3);
+      // Purple glow
+      graphics.fillStyle(0xff00ff, 0.3);
+      graphics.fillCircle(p.x, p.y, 6);
+    } else if (p.type === 'rapidFire') {
+      graphics.fillStyle(0xffff00, 1);
+      graphics.fillCircle(p.x, p.y, 2);
+      // Yellow streak
+      graphics.fillStyle(0xffff00, 0.5);
+      graphics.fillCircle(p.x - p.vx * 0.01, p.y - p.vy * 0.01, 3);
     } else if (p.type === 'missile') {
       // Missile body (larger)
       graphics.fillStyle(0x555555, 1);
@@ -1372,15 +1759,25 @@ function draw() {
   
   // Draw gems (XP)
   for (let g of gems) {
-    // Gem glow
-    graphics.fillStyle(0xF9BC13, 0.4);
-    graphics.fillCircle(g.x, g.y, 6);
-    // Gem core
-    graphics.fillStyle(0xF9BC13, 1);
+    // Gem glow (green with fever mode enhancement)
+    const glowColor = feverMode ? 0x00ff00 : 0x00aa00;
+    const glowSize = feverMode ? 10 : 6;
+    graphics.fillStyle(glowColor, feverMode ? 0.6 : 0.4);
+    graphics.fillCircle(g.x, g.y, glowSize);
+    
+    // Gem core (green)
+    graphics.fillStyle(0x00ff00, 1);
     graphics.fillCircle(g.x, g.y, 4);
-    // Bright center
-    graphics.fillStyle(0xFCD470, 1);
+    
+    // Bright center (lighter green)
+    graphics.fillStyle(0x88ff88, 1);
     graphics.fillCircle(g.x, g.y, 2);
+    
+    // Extra sparkle in fever mode
+    if (feverMode && Math.random() > 0.7) {
+      graphics.fillStyle(0xffffff, 0.8);
+      graphics.fillCircle(g.x, g.y, 1);
+    }
   }
   
   // Update HP bar (glowing)
@@ -1401,24 +1798,35 @@ function draw() {
     hpBar.fillRect(20, 560, hp * 2, 4);
   }
 
-  // Update XP bar
+  // Update XP bar (green)
   xpBar.clear();
   const xpInLevel = xp % 10; // Current XP progress within the level (0-9)
   const xpPercent = xpInLevel / 10; // Convert to 0.0-1.0
   const xpWidth = 200 * xpPercent;
   
-  // Glow effect
-  xpBar.fillStyle(0xF9BC13, 0.3);
+  // Fever mode pulsing effect
+  const feverPulse = feverMode ? Math.sin(Date.now() / 100) * 0.2 + 0.3 : 0.3;
+  
+  // Glow effect (enhanced in fever mode)
+  xpBar.fillStyle(0x00ff00, feverPulse);
   xpBar.fillRect(18, 581, xpWidth + 4, 14);
   
-  // Main bar
-  xpBar.fillStyle(0xF9BC13, 1);
+  // Main bar (green)
+  xpBar.fillStyle(0x00ff00, 1);
   xpBar.fillRect(20, 583, xpWidth, 10);
   
   // Bright edge
   if (xpWidth > 0) {
-    xpBar.fillStyle(0xFCD470, 1);
+    xpBar.fillStyle(0x88ff88, 1);
     xpBar.fillRect(20, 583, xpWidth, 2);
+  }
+  
+  // Fever mode indicator
+  if (feverMode) {
+    const feverAlpha = Math.sin(Date.now() / 80) * 0.3 + 0.7;
+    xpBar.fillStyle(0xffff00, feverAlpha);
+    xpBar.fillRect(18, 581, 204, 2);
+    xpBar.fillRect(18, 593, 204, 2);
   }
 }
 
@@ -1470,6 +1878,9 @@ function addToLeaderboard(newScore, time) {
 
 function endGame(scene) {
   gameOver = true;
+  
+  // Stop background music
+  stopBackgroundMusic();
   
   // Add current score to leaderboard
   addToLeaderboard(score, gameDuration);
@@ -1548,13 +1959,22 @@ function endGame(scene) {
   }
   
   // Restart button
-  const restartBtn = scene.add.text(400, 545, 'RESTART', {
+  const restartBtn = scene.add.text(400, 535, 'RESTART', {
     fontSize: '28px',
     fontFamily: 'Consolas, monospace',
     color: '#ffffff',
     stroke: '#000000',
     strokeThickness: 4
   }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+  
+  // Press Enter hint
+  scene.add.text(400, 570, 'Press ENTER to restart', {
+    fontSize: '16px',
+    fontFamily: 'Consolas, monospace',
+    color: '#aaaaaa',
+    stroke: '#000000',
+    strokeThickness: 2
+  }).setOrigin(0.5);
   
   restartBtn.on('pointerover', () => {
     restartBtn.setColor('#aaaaaa');
@@ -1569,10 +1989,10 @@ function endGame(scene) {
     resetGame();
   });
   
-  // Restart on any key (except movement keys)
+  // Restart on any key (except movement keys) or Enter
   scene.input.keyboard.once('keydown', (event) => {
     const movementKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd', 'W', 'A', 'S', 'D'];
-    if (!movementKeys.includes(event.key)) {
+    if (!movementKeys.includes(event.key) || event.key === 'Enter') {
       scene.scene.restart();
       resetGame();
     }
@@ -1602,7 +2022,6 @@ function resetGame() {
   explosions = [];
   spawnTimer = 0;
   spawnRate = 500;
-  waveLevel = 1;
   miniBossSpawned = false;
   
   // Reinitialize background particles
@@ -1619,29 +2038,181 @@ function resetGame() {
     });
   }
   
+  // Reset magnet and fever
+  magnetActive = false;
+  magnetRange = GAME_CONFIG.magnetRange;
+  feverMode = false;
+  feverTimer = 0;
+  recentGemCollects = [];
+  
+  // Reset music
+  stopBackgroundMusic();
+  
   weapons.laser.active = true;
   weapons.laser.level = 1;
   weapons.laser.damage = 15;
   weapons.laser.cooldown = 0;
-  weapons.laser.rate = 1000;
+  weapons.laser.rate = 400;
   
   weapons.missile.active = false;
   weapons.missile.level = 0;
   weapons.missile.damage = 30;
   weapons.missile.cooldown = 0;
-  weapons.missile.rate = 3000;
-  weapons.missile.explosionRadius = 50;
+  weapons.missile.rate = 1500;
+  weapons.missile.explosionRadius = 35;
   
   weapons.blueLaser.active = false;
   weapons.blueLaser.level = 0;
   weapons.blueLaser.damage = 20;
   weapons.blueLaser.cooldown = 0;
-  weapons.blueLaser.rate = 800;
+  weapons.blueLaser.rate = 350;
+  
+  weapons.tripleShot.active = false;
+  weapons.tripleShot.level = 0;
+  weapons.tripleShot.damage = 12;
+  weapons.tripleShot.cooldown = 0;
+  weapons.tripleShot.rate = 500;
+  
+  weapons.pulseWave.active = false;
+  weapons.pulseWave.level = 0;
+  weapons.pulseWave.damage = 25;
+  weapons.pulseWave.cooldown = 0;
+  weapons.pulseWave.rate = 1200;
+  weapons.pulseWave.range = 50;
+  
+  weapons.rapidFire.active = false;
+  weapons.rapidFire.level = 0;
+  weapons.rapidFire.damage = 8;
+  weapons.rapidFire.cooldown = 0;
+  weapons.rapidFire.rate = 150;
 }
 
 // ============================================================================
 // AUDIO SYSTEMS
 // ============================================================================
+
+function startBackgroundMusic(scene) {
+  if (bgMusicPlaying) return;
+  bgMusicPlaying = true;
+  
+  const audioContext = scene.sound.context;
+  
+  // Extended jazzy SEGA-style chord progression (16 chords for longer loop)
+  // Using jazzy 7th chords with more variation
+  const chordProgression = [
+    [261.63, 329.63, 392.00, 493.88], // Cmaj7
+    [220.00, 261.63, 329.63, 415.30], // Am7
+    [174.61, 220.00, 261.63, 329.63], // Fmaj7
+    [196.00, 246.94, 293.66, 369.99], // G7
+    [293.66, 369.99, 440.00, 554.37], // Dm7
+    [196.00, 246.94, 293.66, 369.99], // G7
+    [261.63, 329.63, 392.00, 493.88], // Cmaj7
+    [329.63, 415.30, 493.88, 622.25], // Em7
+    [220.00, 261.63, 329.63, 415.30], // Am7
+    [293.66, 369.99, 440.00, 554.37], // Dm7
+    [196.00, 246.94, 293.66, 369.99], // G7
+    [261.63, 329.63, 392.00, 493.88], // Cmaj7
+    [174.61, 220.00, 261.63, 329.63], // Fmaj7
+    [329.63, 415.30, 493.88, 622.25], // Em7
+    [220.00, 261.63, 329.63, 415.30], // Am7
+    [196.00, 246.94, 293.66, 369.99]  // G7
+  ];
+  
+  const bassLine = [
+    130.81, 110.00, 87.31, 98.00,
+    146.83, 98.00, 130.81, 164.81,
+    110.00, 146.83, 98.00, 130.81,
+    87.31, 164.81, 110.00, 98.00
+  ];
+  
+  let chordIndex = 0;
+  const beatsPerChord = 4; // 4 beats per chord
+  let beatCount = 0;
+  
+  function playBeat() {
+    if (!bgMusicPlaying) return;
+    
+    // Increase BPM based on level (starts at 180, increases by 2 BPM per level, caps at 300)
+    const baseBPM = 180;
+    const bpmIncrease = Math.min(level * 2, 120); // Cap at +120 BPM
+    const bpm = baseBPM + bpmIncrease;
+    const beatDuration = 60 / bpm;
+    
+    const now = audioContext.currentTime;
+    const currentChordIndex = Math.floor(beatCount / beatsPerChord) % chordProgression.length;
+    const beatInChord = beatCount % beatsPerChord;
+    const chord = chordProgression[currentChordIndex];
+    const bass = bassLine[currentChordIndex];
+    
+    // Play chord notes on beats 1 and 3 (syncopated rhythm)
+    if (beatInChord === 0 || beatInChord === 2) {
+      chord.forEach((freq, i) => {
+        const osc = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        
+        osc.connect(gain);
+        gain.connect(audioContext.destination);
+        
+        osc.frequency.value = freq;
+        osc.type = 'triangle';
+        
+        const vol = beatInChord === 0 ? 0.025 : 0.018;
+        gain.gain.setValueAtTime(vol, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        
+        osc.start(now);
+        osc.stop(now + 0.2);
+      });
+    }
+    
+    // Bass on every beat
+    const bassOsc = audioContext.createOscillator();
+    const bassGain = audioContext.createGain();
+    
+    bassOsc.connect(bassGain);
+    bassGain.connect(audioContext.destination);
+    
+    bassOsc.frequency.value = bass;
+    bassOsc.type = 'sine';
+    
+    const bassVol = beatInChord === 0 ? 0.1 : 0.06;
+    bassGain.gain.setValueAtTime(bassVol, now);
+    bassGain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+    
+    bassOsc.start(now);
+    bassOsc.stop(now + 0.3);
+    
+    // Hi-hat on every beat (lighter on off-beats)
+    const hihat = audioContext.createOscillator();
+    const hihatGain = audioContext.createGain();
+    const hihatFilter = audioContext.createBiquadFilter();
+    
+    hihat.connect(hihatFilter);
+    hihatFilter.connect(hihatGain);
+    hihatGain.connect(audioContext.destination);
+    
+    hihat.frequency.value = 10000;
+    hihat.type = 'square';
+    hihatFilter.type = 'highpass';
+    hihatFilter.frequency.value = 8000;
+    
+    const hihatVol = (beatInChord % 2 === 0) ? 0.02 : 0.012;
+    hihatGain.gain.setValueAtTime(hihatVol, now);
+    hihatGain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+    
+    hihat.start(now);
+    hihat.stop(now + 0.04);
+    
+    beatCount++;
+    setTimeout(playBeat, beatDuration * 1000);
+  }
+  
+  playBeat();
+}
+
+function stopBackgroundMusic() {
+  bgMusicPlaying = false;
+}
 
 function playTone(scene, frequency, duration) {
   const audioContext = scene.sound.context;
@@ -1661,32 +2232,62 @@ function playTone(scene, frequency, duration) {
   oscillator.stop(audioContext.currentTime + duration);
 }
 
-function playMeow(scene) {
+function playXPCollectSound(scene) {
   const audioContext = scene.sound.context;
   const now = audioContext.currentTime;
   
-  // Create oscillator for meow sound
+  // Quick upward blip - very short and sweet
   const oscillator = audioContext.createOscillator();
   const gainNode = audioContext.createGain();
   
   oscillator.connect(gainNode);
   gainNode.connect(audioContext.destination);
   
-  // Happy meow - starts high, dips, then goes back up
-  oscillator.frequency.setValueAtTime(900, now);
-  oscillator.frequency.exponentialRampToValueAtTime(600, now + 0.08);
-  oscillator.frequency.exponentialRampToValueAtTime(750, now + 0.15);
+  // Quick pitch rise from C to E (satisfying interval)
+  oscillator.frequency.setValueAtTime(523.25, now);
+  oscillator.frequency.exponentialRampToValueAtTime(659.25, now + 0.05);
   
-  oscillator.type = 'sine';
+  oscillator.type = 'sine'; // Soft, pleasant tone
   
-  // Volume envelope - snappier and brighter
-  gainNode.gain.setValueAtTime(0, now);
-  gainNode.gain.linearRampToValueAtTime(0.2, now + 0.01);
-  gainNode.gain.linearRampToValueAtTime(0.15, now + 0.08);
-  gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+  // Very short envelope
+  gainNode.gain.setValueAtTime(0.08, now);
+  gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
   
   oscillator.start(now);
-  oscillator.stop(now + 0.18);
+  oscillator.stop(now + 0.08);
+}
+
+function playMeow(scene) {
+  const audioContext = scene.sound.context;
+  const now = audioContext.currentTime;
+  
+  // Happy level up sound - ascending arpeggio (C major chord + octave)
+  const oscillator = audioContext.createOscillator();
+  const gainNode = audioContext.createGain();
+  
+  oscillator.connect(gainNode);
+  gainNode.connect(audioContext.destination);
+  
+  // Ascending notes: C5 -> E5 -> G5 -> C6 (happy major chord)
+  const notes = [523.25, 659.25, 783.99, 1046.50];
+  oscillator.frequency.setValueAtTime(notes[0], now);
+  oscillator.frequency.setValueAtTime(notes[1], now + 0.08);
+  oscillator.frequency.setValueAtTime(notes[2], now + 0.16);
+  oscillator.frequency.setValueAtTime(notes[3], now + 0.24);
+  
+  // Square wave for retro game sound
+  oscillator.type = 'square';
+  
+  // Volume envelope - bouncy and energetic
+  gainNode.gain.setValueAtTime(0, now);
+  gainNode.gain.linearRampToValueAtTime(0.15, now + 0.01);
+  gainNode.gain.setValueAtTime(0.15, now + 0.08);
+  gainNode.gain.setValueAtTime(0.15, now + 0.16);
+  gainNode.gain.setValueAtTime(0.15, now + 0.24);
+  gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+  
+  oscillator.start(now);
+  oscillator.stop(now + 0.4);
 }
 
 function playGameOver(scene) {
