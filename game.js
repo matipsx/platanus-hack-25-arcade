@@ -201,6 +201,8 @@ let magnetRange = GAME_CONFIG.magnetRange;
 let feverMode = false;
 let feverTimer = 0;
 let recentGemCollects = [];
+let powerups = []; // Fever mode powerups
+let lastFeverDropLevel = 0; // Track when we last dropped a fever powerup
 
 // Background music
 let bgMusicOscillators = [];
@@ -446,6 +448,14 @@ function create() {
     align: 'center'
   }).setOrigin(0.5).setDepth(1001);
   
+  // Credit text at bottom
+  const creditText = this.add.text(400, 570, 'A Game by MatiPSX', {
+    fontSize: '14px',
+    fontFamily: 'Consolas, monospace',
+    color: '#888888',
+    align: 'center'
+  }).setOrigin(0.5).setDepth(1001);
+  
   // Wait for any key press to start
   this.input.keyboard.once('keydown', () => {
     gameStarted = true;
@@ -454,6 +464,7 @@ function create() {
     bananaArt.destroy();
     pressStart.destroy();
     controls.destroy();
+    creditText.destroy();
     startBackgroundMusic(this);
     playMeow(this);
   });
@@ -472,7 +483,7 @@ function update(time, delta) {
   updateTimer();
 
   // Update fever mode
-  updateFeverMode(delta);
+  updateFeverMode(this, delta);
 
   // Update systems
   updatePlayerMovement(delta);
@@ -1297,6 +1308,16 @@ function killBanana(scene, index) {
     gems.push({ x: b.x + offsetX, y: b.y + offsetY, value: 1 });
   }
   
+  // Drop fever powerup randomly (one per 2 levels)
+  if (!b.isBoss && level >= lastFeverDropLevel + 2 && Math.random() < 0.15) {
+    powerups.push({
+      x: b.x,
+      y: b.y,
+      type: 'fever'
+    });
+    lastFeverDropLevel = level;
+  }
+  
   bananas.splice(index, 1);
   playTone(scene, 660, 0.05);
 }
@@ -1305,22 +1326,30 @@ function killBanana(scene, index) {
 // PROGRESSION SYSTEMS
 // ============================================================================
 
-function updateFeverMode(delta) {
-  // Clean up old gem collect timestamps
-  const now = Date.now();
-  recentGemCollects = recentGemCollects.filter(time => now - time < 2000);
-  
-  // Update fever timer
+function updateFeverMode(scene, delta) {
+  // Update fever timer (now only activated by pickup)
   if (feverMode) {
     feverTimer -= delta;
     if (feverTimer <= 0) {
       feverMode = false;
     }
-  } else {
-    // Check if we should enter fever mode
-    if (recentGemCollects.length >= GAME_CONFIG.feverThreshold) {
-      feverMode = true;
-      feverTimer = GAME_CONFIG.feverDuration;
+  }
+  
+  // Update and collect powerups
+  for (let i = powerups.length - 1; i >= 0; i--) {
+    const p = powerups[i];
+    const dx = player.x - p.x;
+    const dy = player.y - p.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    
+    // Collect powerup
+    if (dist < player.size + 10) {
+      if (p.type === 'fever') {
+        feverMode = true;
+        feverTimer = GAME_CONFIG.feverDuration;
+        playTone(scene, 800, 0.1);
+      }
+      powerups.splice(i, 1);
     }
   }
 }
@@ -1366,9 +1395,6 @@ function updateGems(scene) {
       
       // XP collect sound
       playXPCollectSound(scene);
-      
-      // Track gem collection for fever mode
-      recentGemCollects.push(Date.now());
       
       // Gem collect particles (green)
       for (let j = 0; j < 8; j++) {
@@ -1780,6 +1806,38 @@ function draw() {
     }
   }
   
+  // Draw fever powerups (yellow glowing stars)
+  for (let p of powerups) {
+    if (p.type === 'fever') {
+      const pulse = Math.sin(Date.now() / 100) * 2 + 8;
+      
+      // Outer glow (yellow)
+      graphics.fillStyle(0xffff00, 0.4);
+      graphics.fillCircle(p.x, p.y, pulse);
+      
+      // Star shape
+      graphics.fillStyle(0xffff00, 1);
+      const points = 5;
+      const outerRadius = 8;
+      const innerRadius = 4;
+      graphics.beginPath();
+      for (let i = 0; i < points * 2; i++) {
+        const radius = i % 2 === 0 ? outerRadius : innerRadius;
+        const angle = (i * Math.PI) / points - Math.PI / 2;
+        const x = p.x + Math.cos(angle) * radius;
+        const y = p.y + Math.sin(angle) * radius;
+        if (i === 0) graphics.moveTo(x, y);
+        else graphics.lineTo(x, y);
+      }
+      graphics.closePath();
+      graphics.fillPath();
+      
+      // Bright center
+      graphics.fillStyle(0xffffff, 0.8);
+      graphics.fillCircle(p.x, p.y, 3);
+    }
+  }
+  
   // Update HP bar (glowing)
   hpBar.clear();
   const hpPercent = hp / 100;
@@ -2020,9 +2078,11 @@ function resetGame() {
   projectiles = [];
   particles = [];
   explosions = [];
+  powerups = [];
   spawnTimer = 0;
   spawnRate = 500;
   miniBossSpawned = false;
+  lastFeverDropLevel = 0;
   
   // Reinitialize background particles
   backgroundParticles = [];
@@ -2320,3 +2380,5 @@ function playGameOver(scene) {
   oscillator.start(now);
   oscillator.stop(now + notes.length * 0.08);
 }
+
+// Follow Boquila
